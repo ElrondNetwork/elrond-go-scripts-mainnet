@@ -25,9 +25,11 @@ case "$1" in
   then
       NUMBEROFNODES = 1
   fi
-  
+
+  #Check if variables are set
+  if [ -z "$CUSTOM_HOME" ] || [ -z "$CUSTOM_USER" ]; then echo -e "${RED}Please configure your variables first ! (variables.cfg --> CUSTOM_HOME & CUSTOM_USER)${NC}"; exit; fi  
   #Check if CUSTOM_HOME exists
-  if ! [ -d "$CUSTOM_HOME" ]; then echo -e "${RED}Please configure your variables first ! (variables.cfg --> CUSTOM_HOME & CUSTOM_USER)${NC}"; exit; fi
+  if ! [ -d "$CUSTOM_HOME" ]; then echo -e "${RED}Please make sure that the directory set in variables.cfg (${CUSTOM_HOME}) exists ${NC}"; exit; fi
 
   prerequisites
 
