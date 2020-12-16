@@ -32,7 +32,7 @@ if [ $# -eq 0 ]
 
   COLUMNS=12
   PS3="Please select an action:"
-  options=("install" "observing_squad" "upgrade" "upgrade_proxy" "upgrade_squad" "remove_db" "start" "stop" "cleanup" "github_pull" "get_logs" "quit")
+  options=("install" "observing_squad" "upgrade" "upgrade_proxy" "upgrade_squad" "remove_db" "start" "stop" "restart" "cleanup" "github_pull" "get_logs" "quit")
 
   select opt in "${options[@]}"
   do
@@ -97,6 +97,14 @@ if [ $# -eq 0 ]
 
   'stop')
     stop
+    echo -e
+    read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+    clear
+    show_menu
+    ;;
+  
+  'restart')
+    stop && start
     echo -e
     read -n 1 -s -r -p "  Process finished. Press any key to continue..."
     clear
@@ -171,6 +179,10 @@ case "$1" in
 
 'stop')
   stop
+  ;;
+
+'restart')
+  stop && start
   ;;
 
 'cleanup')
