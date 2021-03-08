@@ -10,7 +10,7 @@ source $SCRIPTPATH/config/menu_functions.cfg
 
 #Check if there are newer versions of the scripts available
 cd $SCRIPTPATH
-CURRENT_SCRIPTS_COMMIT=$(git show | grep commit | awk '{print $2}')
+CURRENT_SCRIPTS_COMMIT=$(git show | grep  -m 1 commit | awk '{print $2}')
 
 if [ "$LATEST_SCRIPTS_COMMIT" != "$CURRENT_SCRIPTS_COMMIT" ]; then
   echo -e 
@@ -33,6 +33,7 @@ if [ $# -eq 0 ]
   COLUMNS=12
   PS3="Please select an action:"
   options=("install" "observing_squad" "upgrade" "upgrade_proxy" "upgrade_squad" "remove_db" "start" "stop" "restart" "cleanup" "github_pull" "get_logs" "quit")
+
 
   select opt in "${options[@]}"
   do
