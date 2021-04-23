@@ -1,323 +1,197 @@
 #!/bin/bash
 set -e
 
-#Script version
-VERSION="1.0.0"
-
-#Color to the people
-RED='\x1B[0;31m'
-CYAN='\x1B[0;36m'
-GREEN='\x1B[0;32m'
-NC='\x1B[0m'
-
 #Make script aware of its location
-SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
+SCRIPTPATH="$(
+  cd "$(dirname "$0")"
+  pwd -P
+)"
 
-source $SCRIPTPATH/config/variables.cfg
-source $SCRIPTPATH/config/functions.cfg
+source "$SCRIPTPATH"/config/variables.cfg
+source "$SCRIPTPATH"/config/functions.cfg
+source "$SCRIPTPATH"/config/menu_functions.cfg
 
-case "$1" in
+#Check if there are newer versions of the scripts available
+cd "$SCRIPTPATH"
+CURRENT_SCRIPTS_COMMIT=$(git show | grep -m 1 commit | awk '{print $2}')
 
-'install')
-  read -p "How many nodes do you want to run ? : " NUMBEROFNODES
-  re='^[0-9]+$'
-  if ! [[ $NUMBEROFNODES =~ $re ]] && [ "$NUMBEROFNODES" -gt 0 ]
-  then
-      NUMBEROFNODES = 1
-  fi
-  
-  #Check if CUSTOM_HOME exists
-  if ! [ -d "$CUSTOM_HOME" ]; then echo -e "${RED}Please configure your variables first ! (variables.cfg --> CUSTOM_HOME & CUSTOM_USER)${NC}"; exit; fi
-
-  prerequisites
-
-  #Keep track of how many nodes you've started on the machine
-  echo "$NUMBEROFNODES" > $CUSTOM_HOME/.numberofnodes
-  paths
-  go_lang
-  #If repos are present and you run install again this will clean up for you :D
-  if [ -d "$GOPATH/src/github.com/ElrondNetwork/elrond-go" ]; then echo -e "${RED}--> Repos present. Either run the upgrade command or cleanup & install again...${NC}"; echo -e; exit; fi
-  mkdir -p $GOPATH/src/github.com/ElrondNetwork
-  git_clone
-  build_node
-  build_keygen
-  
-  #Run the install process for each node
-  for i in $(seq 1 $NUMBEROFNODES); 
-        do 
-         INDEX=$(( $i - 1 ))
-         WORKDIR="$CUSTOM_HOME/elrond-nodes/node-$INDEX"
-         install
-         install_utils
-         node_name
-         keys
-         systemd
-       done
-       
-  sudo chown -R $CUSTOM_USER: $CUSTOM_HOME/elrond-nodes
-  ;;
-
-'upgrade')
-  paths
-  #Check to see if scripts have been updated
-  cd $SCRIPTPATH
-  CURRENT_SCRIPTS_COMMIT=$(git show | grep commit | awk '{print $2}')
-  
-      if [ $LATEST_SCRIPTS_COMMIT == $CURRENT_SCRIPTS_COMMIT ]; then
-          echo "Strings are equal"
-          cd $GOPATH/src/github.com/ElrondNetwork/elrond-config-mainnet 
-          INSTALLED_CONFIGS=$(git status | grep HEAD | awk '{print $4}')
-          echo -e
-          echo -e "${GREEN}Local version for configs: ${CYAN}tags/$INSTALLED_CONFIGS${NC}"
-          echo -e
-          echo -e "${GREEN}Github version of configs: ${CYAN}$CONFIGVER${NC}"
-          echo -e
-          echo -e "${GREEN}Release notes for the latest version:${NC}"
-          echo -e "${GREEN}$RELEASENOTES${NC}"  
-          echo -e 
-          read -p "Do you want to go on with the upgrade (Default No) ? (Yy/Nn)" yn
-          echo -e
-  
-          case $yn in
-               [Yy]* )
-                 #Remove previously cloned repos
-                 if [ -d "$GOPATH/src/github.com/ElrondNetwork/elrond-go" ]; then sudo rm -rf $GOPATH/src/github.com/ElrondNetwork/elrond-*; echo -e; echo -e "${RED}--> Repos present. Removing and fetching again...${NC}"; echo -e; fi
-                   git_clone
-                   build_node
-                   build_keygen
-                 if ! [ -d "$CUSTOM_HOME/elrond-utils" ]; then mkdir -p $CUSTOM_HOME/elrond-utils; fi
-                   install_utils
-  
-                 INSTALLEDNODES=$(cat $CUSTOM_HOME/.numberofnodes)
-  
-                 #Run the update process for each node
-                 for i in $(seq 1 $INSTALLEDNODES);
-                      do
-                        UPDATEINDEX=$(( $i - 1 ))
-                        UPDATEWORKDIR="$CUSTOM_HOME/elrond-nodes/node-$UPDATEINDEX"
-                        cp -f $UPDATEWORKDIR/config/prefs.toml $UPDATEWORKDIR/config/prefs.toml.save
-        
-                        sudo systemctl stop elrond-node-$UPDATEINDEX
-                        update
-                        mv $UPDATEWORKDIR/config/prefs.toml.save $UPDATEWORKDIR/config/prefs.toml
-                        sudo systemctl start elrond-node-$UPDATEINDEX
-                    done
-                  ;;
-            
-                [Nn]* )
-                  echo -e "${GREEN}Fine ! Skipping upgrade on this machine...${NC}"
-                  ;;
-            
-                * )
-                  echo -e "${GREEN}I'll take that as a no then... moving on...${NC}"
-                  ;;
-            esac
-  
-        else
-          echo -e "${RED}You do not have the latest version of the elrond-go-scripts-mainnet !!!${NC}"
-          echo -e "${RED}Please run ${CYAN}./script.sh github_pull${RED} before running the upgrade command...${NC}"
-       fi
-  ;;
-
-'remove_db')
-  paths
+if [ "$LATEST_SCRIPTS_COMMIT" != "$CURRENT_SCRIPTS_COMMIT" ]; then
   echo -e
-  echo -e "${RED}This action will completly erase the DBs and logs of your nodes !${NC}"  
-  echo -e 
-  read -p "Do you want to go on with the DB erase (Default No) ? (Yy/Nn)" yn
+  read -p "You aren't running the current versions of the scripts. Are you sure you want to continue ? (Yy/Nn)" yn
   echo -e
+
   case $yn in
-       [Yy]* )
+    [Yy]*) ;;
+    [Nn]*)
+      echo "Ok.Exiting."
+      exit
+      ;;
+    *)
+      echo "Please answer Yy / Nn ..."
+      exit
+      ;;
+  esac
+fi
 
-         INSTALLEDNODES=$(cat $CUSTOM_HOME/.numberofnodes)
-         #Run the cleaning process for each node
-         for i in $(seq 1 $INSTALLEDNODES);
-             do
-               UPDATEINDEX=$(( $i - 1 ))
-               UPDATEWORKDIR="$CUSTOM_HOME/elrond-nodes/node-$UPDATEINDEX"
-               
-               echo -e "${GREEN}Stopping Elrond Node-$UPDATEINDEX binary...${NC}"
-               
-               sudo systemctl stop elrond-node-$UPDATEINDEX
-               cleanup
+#See if the user has passed any command line arguments and if not show the menu
+if [ $# -eq 0 ]; then
 
-               #Ask to start the nodes or not after the DB cleanup
-               echo -e 
-               read -p "Do you want to restart elrond-node-$UPDATEINDEX after the DB erase (Default No) ? (Yy/Nn)" yn
-               echo -e
-               case $yn in
-                    [Yy]* )
-                       echo -e "${GREEN}Starting elrond-node-$UPDATEINDEX...${NC}"
-                       echo -e
-                       sudo systemctl start elrond-node-$UPDATEINDEX
-                         ;;
-                      
-                    [Nn]* )
-                       echo -e "${GREEN}Fine ! Leaving node off...${NC}"
-                       echo -e
-                         ;;
-            
-                        * )
-                        echo -e "${GREEN}I'll take that as a no then... moving on...${NC}"
-                        echo -e
-                         ;;
-                    esac
-           done
-            ;;
-            
-       [Nn]* )
-          echo -e "${GREEN}Fine ! Skipping DB cleanup on this machine...${NC}"
-            ;;
-            
-           * )
-           echo -e "${GREEN}I'll take that as a no then... moving on...${NC}"
-            ;;
-      esac
-  ;;
+  show_menu #Show all the menu options
 
-'start')
-  NODESTOSTART=$(cat $CUSTOM_HOME/.numberofnodes)
-  for i in $(seq 1 $NODESTOSTART);
-      do
-        STARTINDEX=$(( $i - 1 ))
+  COLUMNS=12
+  PS3="Please select an action:"
+  options=("install" "observing_squad" "upgrade" "upgrade_squad" "upgrade_proxy" "remove_db" "start" "stop" "cleanup" "github_pull" "get_logs" "quit")
+
+  select opt in "${options[@]}"; do
+
+    case $opt in
+
+      'install')
+        install
         echo -e
-        echo -e "${GREEN}Starting Elrond Node-$STARTINDEX binary on host ${CYAN}$HOST${GREEN}...${NC}"
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
+
+      'observing_squad')
+        observers
         echo -e
-        sudo systemctl start elrond-node-$STARTINDEX
-      done
-  ;;
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
 
-'stop')
-  NODESTOSTOP=$(cat $CUSTOM_HOME/.numberofnodes)
-  for i in $(seq 1 $NODESTOSTOP);
-      do
-        STOPINDEX=$(( $i - 1 ))
+      'upgrade')
+        upgrade
         echo -e
-        echo -e "${GREEN}Stopping Elrond Node-$STOPINDEX binary on host ${CYAN}$HOST${GREEN}...${NC}"
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
+
+      'upgrade_squad')
+        upgrade_squad
         echo -e
-        sudo systemctl stop elrond-node-$STOPINDEX
-      done
-  ;;
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
 
-'cleanup')
-  paths
-  echo -e 
-  read -p "Do you want to delete installed nodes (Default No) ? (Yy/Nn)" yn
-  echo -e
-  case $yn in
-       [Yy]* )
-          echo -e "${RED}OK ! Cleaning everything !${NC}"
-          
-          if [[ -f $CUSTOM_HOME/.numberofnodes ]]; then
-            NODESTODESTROY=$(cat $CUSTOM_HOME/.numberofnodes)
-                for i in $(seq 1 $NODESTODESTROY);
-                    do
-                        KILLINDEX=$(( $i - 1 ))
-                          echo -e
-                          echo -e "${GREEN}Stopping Elrond Node-$KILLINDEX binary on host ${CYAN}$HOST${GREEN}...${NC}"
-                          echo -e
-                          if [ -e /etc/systemd/system/elrond-node-$KILLINDEX.service ]; then sudo systemctl stop elrond-node-$KILLINDEX; fi
-                          echo -e "${GREEN}Erasing unit file and node folder for Elrond Node-$KILLINDEX...${NC}"
-                          echo -e
-                          if [ -e /etc/systemd/system/elrond-node-$KILLINDEX.service ]; then sudo rm /etc/systemd/system/elrond-node-$KILLINDEX.service; fi
-                          if [ -d $CUSTOM_HOME/elrond-nodes/node-$KILLINDEX ]; then sudo rm -rf $CUSTOM_HOME/elrond-nodes/node-$KILLINDEX; fi
-                    done
-          fi
-
-            #Reload systemd after deleting node units
-            sudo systemctl daemon-reload
-            
-            echo -e
-            echo -e "${GREEN}Removing elrond utils...${NC}"
-            echo -e      
-            
-            if ps -all | grep -q termui; then killall termui; sleep 2; fi
-            if [[ -e $CUSTOM_HOME/elrond-utils/termui ]]; then rm $CUSTOM_HOME/elrond-utils/termui; fi
-              
-            if ps -all | grep -q logviewer; then killall logviewer; sleep 2; fi
-            if [[ -e $CUSTOM_HOME/elrond-utils/logviewer ]]; then rm $CUSTOM_HOME/elrond-utils/logviewer; fi
-            
-            rm -rf $CUSTOM_HOME/elrond-utils && rm -rf $CUSTOM_HOME/elrond-nodes
-            
-            echo -e "${GREEN}Removing paths from .profile on host ${CYAN}$HOST${GREEN}...${NC}"
-            echo -e
-            sed -i 'N;$!P;$!D;$d' ~/.profile
-            
-            echo -e "${GREEN}Removing cloned elrond-go & elrond-configs repos from host ${CYAN}$HOST${GREEN}...${NC}"
-            echo -e      
-            if [ -d "$GOPATH/src/github.com/ElrondNetwork/elrond-go" ]; then sudo rm -rf $GOPATH/src/github.com/ElrondNetwork/elrond-*; fi      
-            ;;
-            
-       [Nn]* )
-          echo -e "${GREEN}Fine ! Skipping cleanup on this machine...${NC}"
-            ;;
-            
-           * )
-           echo -e "${GREEN}I'll take that as a no then... moving on...${NC}"
-            ;;
-      esac
-  ;;
-
-'github_pull')
-  #First backup identity, target_ips & variables.cfg
-  if ! [ -d "$CUSTOM_HOME/script-configs-backup" ]; then mkdir -p $CUSTOM_HOME/script-configs-backup; fi
-  
-  echo -e
-  echo -e "${GREEN}---> Backing up your existing configs (variables.cfg & identity)${NC}"
-  echo -e
-  cp -f $SCRIPTPATH/config/variables.cfg $CUSTOM_HOME/script-configs-backup
-  
-  echo -e "${GREEN}---> Fetching the latest version of the sripts...${NC}"
-  echo -e
-  #First let's check if the repo is accesible
-  REPO_STATUS=$(curl -I "https://github.com/ElrondNetwork/elrond-go-scripts-mainnet" 2>&1 | awk '/HTTP\// {print $2}')
-  cd $SCRIPTPATH
-  if [ "$REPO_STATUS" -eq "200" ]; then
-                                #Now let's fetch the latest version of the scripts
-                                echo -e "${GREEN}---> elrond-go-scripts-mainnet is reachable ! Pulling latest version...${NC}"
-                                git reset --hard HEAD
-                                git pull
-                      else echo -e "${RED}---> elrond-go-scripts-mainnet on Github not reachable !${NC}"
-              fi
-  #Restore configs after repo pull
-  echo -e "${GREEN}---> Restoring your config files${NC}"
-  echo -e
-  cp -f $CUSTOM_HOME/script-configs-backup/* $SCRIPTPATH/config/
-  echo -e "${GREEN}---> Finished fetching scripts...${NC}"
-  echo -e
-  ;;
-
-'get_logs')
-  #Get journalctl logs from all the nodes
-  NODELOGS=$(cat $CUSTOM_HOME/.numberofnodes)
-  LOGSTIME=$(date "+%Y%m%d-%H%M")
-  LOGSOFFSET=8080
-  
-  #Make sure the log path exists
-  mkdir -p $CUSTOM_HOME/elrond-logs
-  
-  for i in $(seq 1 $NODELOGS);
-      do
-        LOGSINDEX=$(( $i - 1 ))
-        LOGSAPIPORT=$(( $LOGSOFFSET + $LOGSINDEX ))
+      'upgrade_proxy')
+        upgrade_proxy
         echo -e
-        echo -e "${GREEN}Getting logs for Elrond Node-$LOGSINDEX binary...${NC}"
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
+
+      'remove_db')
+        remove_db
         echo -e
-        LOGSPUBLIC=$(curl -s http://127.0.0.1:$LOGSAPIPORT/node/status | jq -r .details.erd_public_key_block_sign | head -c 12)
-        sudo journalctl --unit elrond-node-$LOGSINDEX >> $CUSTOM_HOME/elrond-logs/elrond-node-$LOGSINDEX-$LOGSPUBLIC.log
-      done
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
 
-  #Compress the logs and erase files
-  cd $CUSTOM_HOME/elrond-logs/ && tar -zcvf elrond-node-logs-$LOGSTIME.tar.gz *.log && rm *.log  
-  ;;
+      'start')
+        start
+        echo -e
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
 
-'version')
-  echo -e
-  echo -e "${GREEN}---> You are on version: ${CYAN}$VERSION${GREEN} of the scripts...${NC}"
-  echo -e
-  ;;
+      'stop')
+        stop
+        echo -e
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
 
-*)
-  echo "Usage: Missing parameter ! [install|upgrade|start|stop|cleanup|get_logs|github_pull|version]"
-  ;;
-esac
+      'cleanup')
+        cleanup
+        echo -e
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
+
+      'github_pull')
+        github_pull
+        echo -e
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
+
+      'get_logs')
+        get_logs
+        echo -e
+        read -n 1 -s -r -p "  Process finished. Press any key to continue..."
+        clear
+        show_menu
+        ;;
+
+      'quit')
+        echo -e
+        echo -e "$GREEN---> Exiting scripts menu...$NC"
+        echo -e
+        break
+        ;;
+
+    esac
+
+  done
+
+else
+
+  case "$1" in
+    'install')
+      install
+      ;;
+
+    'observing_squad')
+      observers
+      ;;
+
+    'upgrade')
+      upgrade
+      ;;
+
+    'upgrade_squad')
+      upgrade_squad
+      ;;
+
+    'upgrade_proxy')
+      upgrade_proxy
+      ;;
+
+    'remove_db')
+      remove_db
+      ;;
+
+    'start')
+      start
+      ;;
+
+    'stop')
+      stop
+      ;;
+
+    'cleanup')
+      cleanup
+      ;;
+
+    'github_pull')
+      github_pull
+      ;;
+
+    'get_logs')
+      get_logs
+      ;;
+
+  esac
+
+fi
